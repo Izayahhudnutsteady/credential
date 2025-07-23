@@ -1,382 +1,309 @@
-
 import streamlit as st
-import os
-from openai import OpenAI
-from dotenv import load_dotenv
-import base64
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import date
-import fitz  # PyMuPDF
-import io
-from PIL import Image
+from faker import Faker
+from fpdf import FPDF
+import random
 
-load_dotenv()
+# Page configuration
+st.set_page_config(
+    page_title="Credential Generator",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-client = OpenAI()
+fake = Faker()
 
-def pdf_to_images(pdf_file):
-    """Convert PDF pages to images"""
-    images = []
-    pdf_document = fitz.open(stream=pdf_file.read(), filetype="pdf")
-    
-    for page_num in range(pdf_document.page_count):
-        page = pdf_document[page_num]
-        # Convert page to image with high DPI for better quality
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
-        img_data = pix.tobytes("png")
-        images.append({
-            'data': img_data,
-            'type': 'png',
-            'name': f"{pdf_file.name}_page_{page_num + 1}"
-        })
-    
-    pdf_document.close()
-    return images
+# -----------------------------
+# Random value pools
+# -----------------------------
+DEGREES = ["MD", "DO", "PhD", "MBBS", "DMD", "DDS", "MSN", "BSN", "MPH", "MBA (Healthcare)", "MHA"]
+EDU_TYPES = ["Medical School", "Residency", "Fellowship", "Nursing School", "Graduate Program", "Continuing Med Ed", "Board Certification Program"]
+POSITIONS = ["Physician", "Surgeon", "Nurse", "Anesthesiologist", "Therapist", "Radiology Tech", "PA", "NP", "Medical Director"]
+RELATIONSHIPS = ["Colleague", "Supervisor", "Mentor", "Program Director", "Residency Director", "Advisor", "Department Chair"]
+COVERAGE_TYPES = ["Malpractice", "General Liability", "Workers Comp", "Cyber Liability", "Auto (Commercial)", "Premises Liability"]
+LIABILITY_TYPES = ["Claims-made", "Occurrence", "Tail Coverage", "Consent to Settle", "Shared Aggregate"]
+POLICY_LIMITS_POOL = [
+    "$1M / $3M", "$2M / $4M", "$500k / $1M", "$5M Aggregate", "$1M Occurrence"
+]
 
-def process_uploaded_files(uploaded_files):
-    """Process uploaded files (images or PDFs) and return list of images"""
-    all_images = []
-    
-    for uploaded_file in uploaded_files:
-        if uploaded_file.type == "application/pdf":
-            # Convert PDF to images
-            pdf_images = pdf_to_images(uploaded_file)
-            all_images.extend(pdf_images)
-        else:
-            # Handle regular image files
-            image_data = uploaded_file.getvalue()
-            image_type = uploaded_file.type.split("/")[1]
-            all_images.append({
-                'data': image_data,
-                'type': image_type,
-                'name': uploaded_file.name
-            })
-    
-    return all_images
+# -----------------------------
+# Section / field schemas
+# -----------------------------
+SECTIONS = {
+    "education": [
+        ("edu_type", "Education and Training Type"),
+        ("degree", "Degree"),
+        ("institution_name", "Institution Name"),
+        ("start_year", "Start Year"),
+        ("end_year", "End Year"),
+    ],
+    "work": [
+        ("position", "Position"),
+        ("practice_name", "Practice Name"),
+        ("practice_address", "Practice Address"),
+        ("start_date", "Start Date"),
+        ("end_date", "End Date"),
+    ],
+    "reference": [
+        ("name", "Name"),
+        ("position", "Position"),
+        ("ref_practice_name", "Practice Name"),
+        ("email", "Email"),
+        ("relationship", "Relationship"),
+        ("phone", "Phone"),
+    ],
+    "insurance": [
+        ("issued_by", "Issued By"),
+        ("coverage_type", "Coverage Type"),
+        ("effective_date", "Effective Date"),
+        ("policy_number", "Policy Number"),
+        ("policy_limits", "Policy Limits"),
+        ("expiration_date", "Expiration Date"),
+    ],
+    "liability": [
+        ("liab_issued_by", "Issued By"),
+        ("liab_policy_number", "Policy Number"),
+        ("liab_coverage_type", "Coverage Type"),
+        ("liab_policy_limits", "Policy Limits"),
+        ("liab_effective_date", "Effective Date"),
+        ("liab_expiration_date", "Expiration Date"),
+    ],
+}
 
-class AircraftInfo(BaseModel):
-    make_model: str
-    registration_number: str
-    serial_number: str
-    hobbs_time: float
-    tach_time: float
-    ttaf: float
-    engine_TSMOH: Optional[str] = None
-    propeller_TSPOH: Optional[str] = None
-    date_of_audit: Optional[str] = None
-    auditor_name: str
 
-class LogbookCondition(BaseModel):
-    all_original_logs_present: bool
-    chronologically_organized: bool
-    legible_handwriting: bool
-    gaps_in_entries: bool
-    scanned_digital_copies_exist: bool
+# -----------------------------
+# Randomizers per field
+# -----------------------------
+def rand_edu_type(): return random.choice(EDU_TYPES)
+def rand_degree(): return random.choice(DEGREES)
+def rand_institution(): return fake.company()
+def rand_year_start(): return str(random.randint(1990, 2018))
+def rand_year_end(): return str(random.randint(2019, 2025))
 
-class InspectionEntry(BaseModel):
-    inspection_type: str
-    last_completed: Optional[str] = None
-    next_due: Optional[str] = None
-    completed: bool
-    notes: str
+def rand_position(): return random.choice(POSITIONS)
+def rand_practice(): return fake.company()
+def rand_address(): return fake.address().replace("\n", ", ")
+def rand_start_date(): return str(fake.date_between("-10y", "-3y"))
+def rand_end_date(): return str(fake.date_between("-2y", "today"))
 
-class RequiredInspections(BaseModel):
-    inspections: List[InspectionEntry]
+def rand_name(): return fake.name()
+def rand_job(): return fake.job()
+def rand_ref_practice(): return fake.company()
+def rand_email(): return fake.email()
+def rand_relationship(): return random.choice(RELATIONSHIPS)
+def rand_phone(): return fake.phone_number()
 
-class ADEntry(BaseModel):
-    ad_number: str
-    description: str
-    complied_date: Optional[str] = None
-    method_of_compliance: Optional[str] = None
-    recurring: bool
-    next_due: Optional[str] = None
-    notes: str
+def rand_ins_issued(): return fake.company()
+def rand_ins_coverage(): return random.choice(COVERAGE_TYPES)
+def rand_ins_effective(): return str(fake.date_between("-3y", "today"))
+def rand_policy_number(): return fake.bothify("???-#######")
+def rand_limits(): return random.choice(POLICY_LIMITS_POOL)
+def rand_expiration(): return str(fake.date_between("today", "+1y"))
 
-class AirworthinessDirectives(BaseModel):
-    ads: List[ADEntry]
+def rand_liab_issued(): return fake.company()
+def rand_liab_policy_number(): return fake.bothify("???-#######")
+def rand_liab_coverage(): return random.choice(LIABILITY_TYPES)
+def rand_liab_limits(): return random.choice(POLICY_LIMITS_POOL)
+def rand_liab_effective(): return str(fake.date_between("-3y", "today"))
+def rand_liab_expiration(): return str(fake.date_between("today", "+1y"))
 
-class ComponentEntry(BaseModel):
-    component: str
-    time_since_overhaul: str
-    next_due: str
-    notes: str
+FIELD_RANDOMIZERS = {
+    "edu_type": rand_edu_type,
+    "degree": rand_degree,
+    "institution_name": rand_institution,
+    "start_year": rand_year_start,
+    "end_year": rand_year_end,
 
-class TimeAndComponents(BaseModel):
-    components: List[ComponentEntry]
+    "position": rand_position,
+    "practice_name": rand_practice,
+    "practice_address": rand_address,
+    "start_date": rand_start_date,
+    "end_date": rand_end_date,
 
-class RepairsAndMods(BaseModel):
-    STCs_logged: bool
-    form_337s: bool
-    field_approvals: bool
-    updated_weight_balance: bool
-    avionics_upgrades: str
+    "name": rand_name,
+    "ref_practice_name": rand_ref_practice,
+    "email": rand_email,
+    "relationship": rand_relationship,
+    "phone": rand_phone,
+    # re-using rand_job for reference "Position"
+    "position_reference": rand_job,
 
-class RegulatoryDocs(BaseModel):
-    airworthiness_certificate: bool
-    registration_certificate: bool
-    current_POH_AFM: bool
-    MEL_applicable: bool
-    maintenance_tracking_reports: bool
+    "issued_by": rand_ins_issued,
+    "coverage_type": rand_ins_coverage,
+    "effective_date": rand_ins_effective,
+    "policy_number": rand_policy_number,
+    "policy_limits": rand_limits,
+    "expiration_date": rand_expiration,
 
-class Summary(BaseModel):
-    missing_items: str
-    outstanding_maintenance_or_ADs: str
-    logbook_gaps: str
-    general_observations: str
-    recommendations: str
+    "liab_issued_by": rand_liab_issued,
+    "liab_policy_number": rand_liab_policy_number,
+    "liab_coverage_type": rand_liab_coverage,
+    "liab_policy_limits": rand_liab_limits,
+    "liab_effective_date": rand_liab_effective,
+    "liab_expiration_date": rand_liab_expiration,
+}
 
-class AviationLogbookAudit(BaseModel):
-    aircraft_info: AircraftInfo
-    logbook_condition: LogbookCondition
-    required_inspections: RequiredInspections
-    airworthiness_directives: AirworthinessDirectives
-    time_and_components: TimeAndComponents
-    repairs_and_mods: RepairsAndMods
-    regulatory_docs: RegulatoryDocs
-    summary: Summary
 
-st.title("Aviation Logbook Audit")
+# -----------------------------
+# Init session state values (blank)
+# -----------------------------
+def ensure_session_defaults():
+    for section_key, fields in SECTIONS.items():
+        for field_key, _label in fields:
+            state_key = f"{section_key}__{field_key}"
+            if state_key not in st.session_state:
+                st.session_state[state_key] = ""
 
-# Initialize session state for storing audit results
-if 'audit_results' not in st.session_state:
-    st.session_state.audit_results = None
-if 'processed_images' not in st.session_state:
-    st.session_state.processed_images = 0
 
-uploaded_files = st.file_uploader("Choose logbook files (images or PDFs)...", type=["jpg", "png", "jpeg", "pdf"], accept_multiple_files=True)
+# -----------------------------
+# Master randomize all
+# -----------------------------
+def randomize_all():
+    for section_key, fields in SECTIONS.items():
+        for field_key, _label in fields:
+            state_key = f"{section_key}__{field_key}"
+            # Some shared field keys (like "position") appear in multiple sections;
+            # differentiate with section prefix, so map to correct randomizer:
+            rand_key = field_key
+            if section_key == "reference" and field_key == "position":
+                rand_key = "position_reference"
+            if section_key == "liability" and field_key.startswith("liab_"):
+                rand_key = field_key  # already prefixed
+            if section_key == "insurance" and field_key in FIELD_RANDOMIZERS:
+                rand_key = field_key
+            # fallback
+            rand_func = FIELD_RANDOMIZERS.get(rand_key, lambda: fake.word())
+            st.session_state[state_key] = rand_func()
 
-if uploaded_files:
-    # Process all uploaded files (convert PDFs to images)
-    all_images = process_uploaded_files(uploaded_files)
-    
-    st.write(f"📁 Uploaded {len(uploaded_files)} files → {len(all_images)} images to analyze")
-    
-    # Display processed images in a grid
-    cols = st.columns(min(len(all_images), 4))
-    for i, image_info in enumerate(all_images):
-        with cols[i % 4]:
-            # Display image from bytes
-            st.image(image_info['data'], caption=image_info['name'], use_container_width=True)
-    
-    # Generate Report Button
-    if st.button("🔍 Generate Logbook Audit Report", type="primary"):
-        batch_size = 5
-        total_batches = (len(all_images) + batch_size - 1) // batch_size
-        
-        # Create progress bar
-        progress_bar = st.progress(0, f"Starting analysis...")
-        status_text = st.empty()
-        
-        # Reset session state for new analysis
-        st.session_state.audit_results = None
-        st.session_state.processed_images = 0
-        
-        # Process all batches automatically
-        for batch_num in range(total_batches):
-            start_idx = batch_num * batch_size
-            end_idx = min(start_idx + batch_size, len(all_images))
-            batch_images = all_images[start_idx:end_idx]
-            
-            # Update progress
-            progress = (batch_num + 1) / total_batches
-            status_text.text(f"Processing batch {batch_num + 1} of {total_batches} ({len(batch_images)} images)...")
-            
-            # Prepare messages with batch images
-            if st.session_state.audit_results is None:
-                # First batch - no previous context
-                system_message = "You are an expert aviation logbook auditor. Analyze the provided logbook images and extract information to fill out the aviation logbook audit template. DO NOT make up information - if you cannot find specific information in the images, leave those fields blank or use appropriate null values. It's perfectly acceptable to leave fields empty until the information is found in the images."
-                user_message = "Please analyze these aviation logbook images and extract all available information to complete the logbook audit. Only include information that you can clearly see in the images. If information is not visible or unclear, leave those fields blank. Focus on accuracy over completeness."
-            else:
-                # Subsequent batches - include previous results as context
-                system_message = "You are an expert aviation logbook auditor. You have already analyzed some logbook images and created a partial audit report. Now analyze these additional images and UPDATE the existing audit report with any new information found. DO NOT make up information - only add information you can clearly see in the new images. Keep existing information unless you find conflicting data that is more accurate."
-                user_message = f"Here is the current audit report from previous images: {st.session_state.audit_results.model_dump_json()}. Now analyze these additional logbook images and update the audit report with any new information you can clearly see. Merge the information intelligently - add new inspections, components, ADs, etc. to the existing lists, and update fields that were previously empty if you now have the information."
-            
-            messages = [
-                {"role": "system", "content": system_message},
-                {
-                    "role": "user", 
-                    "content": [
-                        {"type": "text", "text": user_message}
-                    ]
-                }
-            ]
-            
-            # Add batch images to the message
-            for image_info in batch_images:
-                base64_image = base64.b64encode(image_info['data']).decode("utf-8")
-                
-                messages[1]["content"].append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/{image_info['type']};base64,{base64_image}"
-                    }
-                })
 
-            # Process the batch
-            response = client.beta.chat.completions.parse(
-                model="gpt-4o-2024-08-06",
-                messages=messages,
-                max_tokens=4000,
-                response_format=AviationLogbookAudit,
-            )
-            
-            # Update session state with new results
-            st.session_state.audit_results = response.choices[0].message.parsed
-            st.session_state.processed_images = end_idx
-            
-            # Update progress bar
-            progress_bar.progress(progress, f"Completed batch {batch_num + 1} of {total_batches}")
-        
-        # Final completion
-        progress_bar.progress(1.0, f"✅ Analysis complete! Processed {len(all_images)} images.")
-        status_text.text("🎉 All batches processed successfully!")
-        
-        # Now show the final results
-        st.rerun()
-    
-    # Display results if we have any (only after all processing is complete)
-    elif st.session_state.audit_results:
-        audit = st.session_state.audit_results
-        
-        # Add a reset button
-        if st.button("🔄 Reset and Start Over", type="secondary"):
-            st.session_state.audit_results = None
-            st.session_state.processed_images = 0
+# -----------------------------
+# Render a field row
+# -----------------------------
+def render_field(section_key: str, field_key: str, label: str):
+    state_key = f"{section_key}__{field_key}"
+    col1, col2 = st.columns([5, 1])
+
+    with col1:
+        st.session_state[state_key] = st.text_input(
+            label,
+            value=st.session_state.get(state_key, ""),
+            key=f"input_{state_key}",
+        )
+
+    with col2:
+        if st.button("🎲", key=f"dice_{state_key}"):
+            # choose correct randomizer mapping
+            rand_key = field_key
+            if section_key == "reference" and field_key == "position":
+                rand_key = "position_reference"
+            rand_func = FIELD_RANDOMIZERS.get(rand_key, lambda: fake.word())
+            st.session_state[state_key] = rand_func()
+            # Force immediate UI update by rerunning
             st.rerun()
-        
-        # Create tabs for different sections
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-            "🛩️ Aircraft Info", 
-            "📋 Logbook Condition", 
-            "🔍 Inspections", 
-            "⚠️ Airworthiness Directives", 
-            "⏱️ Time & Components", 
-            "🔧 Repairs & Mods", 
-            "📄 Regulatory Docs", 
-            "📝 Summary"
-        ])
-        
-        with tab1:
-            st.header("Aircraft Information")
-            aircraft_data = {
-                "Field": ["Make/Model", "Registration", "Serial Number", "Hobbs Time", "Tach Time", "TTAF", "Engine TSMOH", "Propeller TSPOH", "Date of Audit", "Auditor"],
-                "Value": [
-                    str(audit.aircraft_info.make_model),
-                    str(audit.aircraft_info.registration_number),
-                    str(audit.aircraft_info.serial_number),
-                    str(audit.aircraft_info.hobbs_time),
-                    str(audit.aircraft_info.tach_time),
-                    str(audit.aircraft_info.ttaf),
-                    str(audit.aircraft_info.engine_TSMOH or "Not specified"),
-                    str(audit.aircraft_info.propeller_TSPOH or "Not specified"),
-                    str(audit.aircraft_info.date_of_audit or "Not specified"),
-                    str(audit.aircraft_info.auditor_name)
-                ]
-            }
-            st.table(aircraft_data)
-        
-        with tab2:
-            st.header("Logbook Condition")
-            condition_data = {
-                "Condition": ["All Original Logs Present", "Chronologically Organized", "Legible Handwriting", "Gaps in Entries", "Digital Copies Exist"],
-                "Status": [
-                    "✅ Yes" if audit.logbook_condition.all_original_logs_present else "❌ No",
-                    "✅ Yes" if audit.logbook_condition.chronologically_organized else "❌ No",
-                    "✅ Yes" if audit.logbook_condition.legible_handwriting else "❌ No",
-                    "⚠️ Yes" if audit.logbook_condition.gaps_in_entries else "✅ No",
-                    "✅ Yes" if audit.logbook_condition.scanned_digital_copies_exist else "❌ No"
-                ]
-            }
-            st.table(condition_data)
-        
-        with tab3:
-            st.header("Required Inspections")
-            if audit.required_inspections.inspections:
-                inspection_data = {
-                    "Inspection Type": [str(i.inspection_type) for i in audit.required_inspections.inspections],
-                    "Last Completed": [str(i.last_completed or "Not specified") for i in audit.required_inspections.inspections],
-                    "Next Due": [str(i.next_due or "Not specified") for i in audit.required_inspections.inspections],
-                    "Completed": ["✅ Yes" if i.completed else "❌ No" for i in audit.required_inspections.inspections],
-                    "Notes": [str(i.notes) for i in audit.required_inspections.inspections]
-                }
-                st.table(inspection_data)
-            else:
-                st.info("No inspection information found in the images.")
-        
-        with tab4:
-            st.header("Airworthiness Directives")
-            if audit.airworthiness_directives.ads:
-                ad_data = {
-                    "AD Number": [str(ad.ad_number) for ad in audit.airworthiness_directives.ads],
-                    "Description": [str(ad.description) for ad in audit.airworthiness_directives.ads],
-                    "Complied Date": [str(ad.complied_date or "Not specified") for ad in audit.airworthiness_directives.ads],
-                    "Method": [str(ad.method_of_compliance or "Not specified") for ad in audit.airworthiness_directives.ads],
-                    "Recurring": ["✅ Yes" if ad.recurring else "❌ No" for ad in audit.airworthiness_directives.ads],
-                    "Next Due": [str(ad.next_due or "Not specified") for ad in audit.airworthiness_directives.ads],
-                    "Notes": [str(ad.notes) for ad in audit.airworthiness_directives.ads]
-                }
-                st.table(ad_data)
-            else:
-                st.info("No airworthiness directive information found in the images.")
-        
-        with tab5:
-            st.header("Time and Components")
-            if audit.time_and_components.components:
-                component_data = {
-                    "Component": [str(c.component) for c in audit.time_and_components.components],
-                    "Time Since Overhaul": [str(c.time_since_overhaul) for c in audit.time_and_components.components],
-                    "Next Due": [str(c.next_due) for c in audit.time_and_components.components],
-                    "Notes": [str(c.notes) for c in audit.time_and_components.components]
-                }
-                st.table(component_data)
-            else:
-                st.info("No component time information found in the images.")
-        
-        with tab6:
-            st.header("Repairs and Modifications")
-            repairs_data = {
-                "Item": ["STCs Logged", "Form 337s", "Field Approvals", "Updated Weight & Balance", "Avionics Upgrades"],
-                "Status/Details": [
-                    "✅ Yes" if audit.repairs_and_mods.STCs_logged else "❌ No",
-                    "✅ Yes" if audit.repairs_and_mods.form_337s else "❌ No",
-                    "✅ Yes" if audit.repairs_and_mods.field_approvals else "❌ No",
-                    "✅ Yes" if audit.repairs_and_mods.updated_weight_balance else "❌ No",
-                    str(audit.repairs_and_mods.avionics_upgrades or "None specified")
-                ]
-            }
-            st.table(repairs_data)
-        
-        with tab7:
-            st.header("Regulatory Documents")
-            docs_data = {
-                "Document": ["Airworthiness Certificate", "Registration Certificate", "Current POH/AFM", "MEL Applicable", "Maintenance Tracking Reports"],
-                "Status": [
-                    "✅ Present" if audit.regulatory_docs.airworthiness_certificate else "❌ Missing",
-                    "✅ Present" if audit.regulatory_docs.registration_certificate else "❌ Missing",
-                    "✅ Present" if audit.regulatory_docs.current_POH_AFM else "❌ Missing",
-                    "✅ Yes" if audit.regulatory_docs.MEL_applicable else "❌ No",
-                    "✅ Present" if audit.regulatory_docs.maintenance_tracking_reports else "❌ Missing"
-                ]
-            }
-            st.table(docs_data)
-        
-        with tab8:
-            st.header("Audit Summary")
-            st.subheader("Missing Items")
-            st.write(audit.summary.missing_items or "None identified")
-            
-            st.subheader("Outstanding Maintenance or ADs")
-            st.write(audit.summary.outstanding_maintenance_or_ADs or "None identified")
-            
-            st.subheader("Logbook Gaps")
-            st.write(audit.summary.logbook_gaps or "None identified")
-            
-            st.subheader("General Observations")
-            st.write(audit.summary.general_observations or "No additional observations")
-            
-            st.subheader("Recommendations")
-            st.write(audit.summary.recommendations or "No specific recommendations")
 
-else:
-    st.info("👆 Please upload one or more logbook images to begin the audit process.")
+
+# -----------------------------
+# Render a section
+# -----------------------------
+def render_section(section_key: str, title: str):
+    st.subheader(title)
+    for field_key, label in SECTIONS[section_key]:
+        render_field(section_key, field_key, label)
+    
+    # Add individual PDF download button for this section
+    section_data = {}
+    for field_key, label in SECTIONS[section_key]:
+        state_key = f"{section_key}__{field_key}"
+        section_data[label] = st.session_state.get(state_key, "")
+    
+    pdf_path = build_single_category_pdf(section_key, section_data)
+    with open(pdf_path, "rb") as f:
+        st.download_button(
+            f"📄 Download {title} PDF", 
+            f, 
+            file_name=f"{section_key}_document.pdf",
+            key=f"download_{section_key}"
+        )
+    st.markdown("---")
+
+
+# -----------------------------
+# Gather data for PDF
+# -----------------------------
+def collect_data_for_pdf():
+    data = {}
+    for section_key, fields in SECTIONS.items():
+        section_data = {}
+        for field_key, label in fields:
+            state_key = f"{section_key}__{field_key}"
+            section_data[label] = st.session_state.get(state_key, "")
+        data[section_key] = section_data
+    return data
+
+
+# -----------------------------
+# PDF creation
+# -----------------------------
+def build_pdf(data: dict, out_path: str = "generated_form.pdf"):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    for section_key, section_data in data.items():
+        title = section_key.replace("_", " ").title()
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 10, txt=title, ln=True)
+        pdf.set_font("Arial", "", 12)
+        for label, value in section_data.items():
+            pdf.multi_cell(0, 8, txt=f"{label}: {value}")
+        pdf.ln(4)
+
+    pdf.output(out_path)
+    return out_path
+
+def build_single_category_pdf(section_key: str, section_data: dict, out_path: str = None):
+    if out_path is None:
+        out_path = f"{section_key}_document.pdf"
+    
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # Title
+    title = section_key.replace("_", " ").title()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 15, txt=f"{title} Document", ln=True, align='C')
+    pdf.ln(5)
+    
+    # Content
+    pdf.set_font("Arial", "", 12)
+    for label, value in section_data.items():
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 8, txt=f"{label}:", ln=True)
+        pdf.set_font("Arial", "", 12)
+        pdf.multi_cell(0, 6, txt=str(value))
+        pdf.ln(2)
+    
+    pdf.output(out_path)
+    return out_path
+
+
+# -----------------------------
+# MAIN APP
+# -----------------------------
+st.title("📄 Credential Generator")
+
+ensure_session_defaults()
+
+# Master randomize button
+if st.button("🎲 Generate All Random"):
+    randomize_all()
+    st.rerun()
+
+# Sections
+render_section("education", "Education and Training")
+render_section("work", "Work History")
+render_section("reference", "Professional Reference")
+render_section("insurance", "Insurance")
+render_section("liability", "Professional Liability")
+
