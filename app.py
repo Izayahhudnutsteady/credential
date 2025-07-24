@@ -1,7 +1,8 @@
 import streamlit as st
 from faker import Faker
-from fpdf import FPDF
+from PIL import Image, ImageDraw, ImageFont
 import random
+import io
 
 # Page configuration
 st.set_page_config(
@@ -210,20 +211,20 @@ def render_section(section_key: str, title: str):
     for field_key, label in SECTIONS[section_key]:
         render_field(section_key, field_key, label)
     
-    # Add individual PDF download button for this section
+    # Add individual PNG download button for this section
     section_data = {}
     for field_key, label in SECTIONS[section_key]:
         state_key = f"{section_key}__{field_key}"
         section_data[label] = st.session_state.get(state_key, "")
     
-    pdf_path = build_single_category_pdf(section_key, section_data)
-    with open(pdf_path, "rb") as f:
-        st.download_button(
-            f"📄 Download {title} PDF", 
-            f, 
-            file_name=f"{section_key}_document.pdf",
-            key=f"download_{section_key}"
-        )
+    img_bytes = create_category_image(section_key, section_data)
+    st.download_button(
+        f"🖼️ Download {title} Image", 
+        img_bytes, 
+        file_name=f"{section_key}_document.png",
+        mime="image/png",
+        key=f"download_{section_key}"
+    )
     st.markdown("---")
 
 
@@ -242,50 +243,70 @@ def collect_data_for_pdf():
 
 
 # -----------------------------
-# PDF creation
+# PNG Image creation
 # -----------------------------
-def build_pdf(data: dict, out_path: str = "generated_form.pdf"):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
-
-    for section_key, section_data in data.items():
-        title = section_key.replace("_", " ").title()
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, txt=title, ln=True)
-        pdf.set_font("Arial", "", 12)
-        for label, value in section_data.items():
-            pdf.multi_cell(0, 8, txt=f"{label}: {value}")
-        pdf.ln(4)
-
-    pdf.output(out_path)
-    return out_path
-
-def build_single_category_pdf(section_key: str, section_data: dict, out_path: str = None):
-    if out_path is None:
-        out_path = f"{section_key}_document.pdf"
+def create_category_image(section_key: str, section_data: dict):
+    # Image dimensions
+    width = 800
+    base_height = 150
+    line_height = 40
     
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    # Calculate height based on content
+    content_lines = len(section_data) * 2  # Label + value for each field
+    height = base_height + (content_lines * line_height) + 100
+    
+    # Create image
+    img = Image.new('RGB', (width, height), color='white')
+    draw = ImageDraw.Draw(img)
+    
+    # Try to load a font, fall back to default if not available
+    try:
+        title_font = ImageFont.truetype("Arial.ttf", 24)
+        label_font = ImageFont.truetype("Arial.ttf", 16)
+        value_font = ImageFont.truetype("Arial.ttf", 14)
+    except:
+        try:
+            title_font = ImageFont.load_default()
+            label_font = ImageFont.load_default()
+            value_font = ImageFont.load_default()
+        except:
+            title_font = label_font = value_font = None
     
     # Title
     title = section_key.replace("_", " ").title()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 15, txt=f"{title} Document", ln=True, align='C')
-    pdf.ln(5)
+    title_text = f"{title} Document"
+    
+    # Get text size for centering
+    if title_font:
+        title_bbox = draw.textbbox((0, 0), title_text, font=title_font)
+        title_width = title_bbox[2] - title_bbox[0]
+    else:
+        title_width = len(title_text) * 10  # Rough estimate
+    
+    title_x = (width - title_width) // 2
+    draw.text((title_x, 30), title_text, fill='black', font=title_font)
+    
+    # Draw a line under title
+    draw.line([(50, 80), (width-50, 80)], fill='black', width=2)
     
     # Content
-    pdf.set_font("Arial", "", 12)
+    y_pos = 120
     for label, value in section_data.items():
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 8, txt=f"{label}:", ln=True)
-        pdf.set_font("Arial", "", 12)
-        pdf.multi_cell(0, 6, txt=str(value))
-        pdf.ln(2)
+        # Label
+        draw.text((60, y_pos), f"{label}:", fill='#333333', font=label_font)
+        y_pos += 25
+        
+        # Value
+        value_text = str(value) if value else "Not specified"
+        draw.text((80, y_pos), value_text, fill='black', font=value_font)
+        y_pos += 35
     
-    pdf.output(out_path)
-    return out_path
+    # Convert to bytes
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='PNG')
+    img_bytes.seek(0)
+    
+    return img_bytes
 
 
 # -----------------------------
